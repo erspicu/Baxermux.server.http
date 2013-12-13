@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Baxermux.server.http</string>
+    <string name="action_settings">Settings</string>
+    <string name="server_status">http service 尚未啟動</string>
+    <string name="ip_status">目前 IP : </string>
+    <string name="service_turn">服務運作</string>
+    <string name="debug">除錯用</string>
+    <string name="webdav_ext">WebDAV 延伸服務</string>
+    
+
+</resources>
