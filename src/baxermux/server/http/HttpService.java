@@ -33,8 +33,7 @@ import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-
-import java.math.BigInteger;
+import java.lang.System;
 
 // local服務程式參考
 // http://developer.android.com/reference/android/app/Service.html#LocalServiceSample
@@ -167,59 +166,24 @@ public class HttpService extends Service // <--龜毛的東西..
 		public void run()
 		{
 
-			String request_str = null;
 
-			Stopwatch timer = new Stopwatch();
+			String request_header_str = null;
+			String request_str = null;
 
 			try
 			{
 				// 資料接收區 start
 
-				timer.reset();
-				timer.start();
-
-				int b_get = 0;
 
 				ByteArrayOutputStream b_list = new ByteArrayOutputStream();
 
-				int offset = 0;
-
+				// 舊式接收方式 - 讀取速度緩慢
+				// int b_get = 0;
 				/*
 				 * try { //b_get = connectedClient.getInputStream().read(); b_list.write((byte) connectedClient.getInputStream().read() );
 				 * 
 				 * } catch (IOException e) { connectedClient.close(); return; }
 				 */
-
-				byte[] rec_buffer = new byte[1024]; // 1KByte buffer
-				int read_count = connectedClient.getInputStream().read(rec_buffer);
-				b_list.write(rec_buffer, 0, read_count);
-
-				Log.i("my", "read bytes : " + read_count);
-
-				//尚需要修正....
-				while (connectedClient.getInputStream().available() > 0) // 可能還有沒讀完的
-				{
-
-					read_count = connectedClient.getInputStream().read(rec_buffer);
-
-					Log.i("my", "read bytes : " + read_count);
-
-					b_list.write(rec_buffer, 0, read_count);
-				}
-
-				Log.i("my ", "size :" + b_list.size());
-
-				try
-				{
-					request_str = new String(b_list.toByteArray(), "UTF-8");
-				}
-				catch (Exception e)
-				{
-					Log.i("my", "encode error ****************");
-				}
-
-				// Log.i("my", "接收內容 :    " + request_str ) ;
-
 				/*
 				 * while (b_get != -1) { b_list.write((byte) (b_get)); if (connectedClient.getInputStream().available() > 0) { try { b_get =
 				 * connectedClient.getInputStream().read();
@@ -230,10 +194,49 @@ public class HttpService extends Service // <--龜毛的東西..
 				 * 
 				 * }
 				 */
+
+				// 新式讀取接收方式 - 速度ok 但是可靠度尚待確認
+				byte[] rec_buffer = new byte[256]; // 1KByte buffer
+				int read_count = connectedClient.getInputStream().read(rec_buffer);
+				b_list.write(rec_buffer, 0, read_count);
+
+				//
+				while (connectedClient.getInputStream().available() > 0)
+				{
+					read_count = connectedClient.getInputStream().read(rec_buffer);
+					b_list.write(rec_buffer, 0, read_count);
+
+					if (connectedClient.getInputStream().available() == 0)
+						try
+						{
+							Thread.sleep(10);
+						}
+						catch (InterruptedException e)
+						{
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+				}
+
+
+
+				byte[] byte_tmp = b_list.toByteArray();
+
+				try
+				{
+					int body_at = Utils.indexOf(byte_tmp, "\r\n\r\n".getBytes());
+					byte[] byte_header = new byte[body_at + 1];
+					System.arraycopy(byte_tmp, 0, byte_header, 0, body_at + 1);
+					request_str = new String((byte_header), "UTF-8");
+				}
+				catch (Exception e)
+				{
+					Log.i("my", "encode error ****************");
+				}
+
 				// 資料接收區 end
 
-				timer.stop();
-				Log.i("my", "接收花費時間 : " + timer.getElapsedMilliseconds());
+
 
 				// header分析區 start
 				String firstline = "";
@@ -247,21 +250,20 @@ public class HttpService extends Service // <--龜毛的東西..
 					connectedClient.close();
 					return;
 				}
+
 				String[] request_inf = firstline.split(" ");
 				String request_method = request_inf[0];
-
 				// http://www.ewdna.com/2008/11/urlencoder.html
 				String request_target = URLDecoder.decode(request_inf[1], "UTF-8"); // 解碼
-
 				String request_version = request_inf[2];
 
-				// java的substring 跟 c#的 Substring API定義不太同
-				String request_header_str = request_str.substring(firstline.length() + 2, request_str.indexOf("\r\n\r\n"));
-
+				request_header_str = request_str.substring(firstline.length() + 2);
 				HashMap header_list = new HashMap();
 				for (String i : request_header_str.split("\r\n"))
+				{
+					Log.i("my", "h : [" + i + "]");
 					header_list.put(i.substring(0, i.indexOf(": ")), i.substring(i.indexOf(": ") + 2));
-
+				}
 				// header分析區 end
 
 				// 開始進行不同的method處理 暫時先支援 GET method 與 PROPFIND
@@ -275,7 +277,8 @@ public class HttpService extends Service // <--龜毛的東西..
 				}
 
 				// 放行支援的method進行後續處理
-				Log.i("my", "debug [" + request_target + "]");
+				Log.i("my", "debug 1 [" + request_target + "]");
+				Log.i("my", "debug 2 [" + request_method + "]");
 
 				if (request_method.equals("PUT"))
 				{
@@ -286,35 +289,10 @@ public class HttpService extends Service // <--龜毛的東西..
 					{
 						if (target_file.exists())
 							target_file.delete();
-
-						Log.i("my", "a");
-
 						FileOutputStream output = new FileOutputStream(target_file);
-
-						Log.i("my", "b");
-
 						int start = (firstline + "\r\n" + request_header_str + "\r\n\r\n").getBytes().length;
-
-						Log.i("my", "c");
-
-						byte[] byte_tmp = b_list.toByteArray();
-
-						timer.reset();
-						timer.start();
-
-						// if (b_list.size() > 0)
-						// for (int i = start; i < b_list.size(); i++)
-						// output.write(byte_tmp[i]);
-
-						output.write(byte_tmp, start, b_list.size() - start);
-
-						timer.stop();
-						Log.i("my", "寫入資料花費時間 : " + timer.getElapsedMilliseconds());
-
+						output.write(byte_tmp, start - 1, b_list.size() - start + 1);
 						output.close();
-
-						Log.i("my", "e");
-
 						HeadersString = http_ver + " " + "201 Created" + "\r\n";
 					}
 					catch (Exception e)
@@ -477,8 +455,8 @@ public class HttpService extends Service // <--龜毛的東西..
 						rootElement.appendChild(doc.createElement("D:response"));
 						rootElement.getChildNodes().item(th).appendChild(doc.createElement("D:href"));
 
-						rootElement.getChildNodes().item(th).getChildNodes().item(0)
-								.setTextContent(request_target + URLEncoder.encode(file_obj.getName(), "utf8"));
+						rootElement.getChildNodes().item(th).getChildNodes().item(0).setTextContent(request_target + file_obj.getName());// URLEncoder.encode(file_obj.getName(),
+																// "utf8"));
 
 						rootElement.getChildNodes().item(th).appendChild(doc.createElement("D:propstat"));
 						rootElement.getChildNodes().item(th).getChildNodes().item(1).appendChild(doc.createElement("D:prop"));
@@ -520,8 +498,10 @@ public class HttpService extends Service // <--龜毛的東西..
 						rootElement.appendChild(doc.createElement("D:response"));
 						rootElement.getChildNodes().item(th).appendChild(doc.createElement("D:href"));
 
-						rootElement.getChildNodes().item(th).getChildNodes().item(0)
-								.setTextContent(request_target + URLEncoder.encode(file_obj.getName(), "utf8") + "/");
+						rootElement.getChildNodes().item(th).getChildNodes().item(0).setTextContent(request_target + file_obj.getName() + "/");// URLEncoder.encode(file_obj.getName(),
+																// "utf8")
+																// +
+																// "/");
 
 						rootElement.getChildNodes().item(th).appendChild(doc.createElement("D:propstat"));
 						rootElement.getChildNodes().item(th).getChildNodes().item(1).appendChild(doc.createElement("D:prop"));
@@ -556,7 +536,7 @@ public class HttpService extends Service // <--龜毛的東西..
 					// http://stackoverflow.com/questions/4412848/xml-node-to-string-in-java
 					String xmlbody_str = nodeToString(doc.getDocumentElement());
 
-					//Log.i("my", xmlbody_str);
+					// Log.i("my", xmlbody_str);
 
 					body = xmlbody_str.getBytes();
 					HeadersString = http_ver + " " + "207 Multi-Status" + "\r\n";
