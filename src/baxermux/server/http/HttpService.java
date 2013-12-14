@@ -3,6 +3,7 @@ package baxermux.server.http;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.net.InetSocketAddress;
@@ -32,6 +33,8 @@ import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
+
+import java.math.BigInteger;
 
 // local服務程式參考
 // http://developer.android.com/reference/android/app/Service.html#LocalServiceSample
@@ -166,48 +169,71 @@ public class HttpService extends Service // <--龜毛的東西..
 
 			String request_str = null;
 
+			Stopwatch timer = new Stopwatch();
+
 			try
 			{
 				// 資料接收區 start
-				int b_get = 0;
 
-				try
-				{
-					b_get = connectedClient.getInputStream().read();
-				}
-				catch (IOException e)
-				{
-					connectedClient.close();
-					return;
-				}
+				timer.reset();
+				timer.start();
+
+				int b_get = 0;
 
 				ByteArrayOutputStream b_list = new ByteArrayOutputStream();
 
-				while (b_get != -1)
+				int offset = 0;
+
+				/*
+				 * try { //b_get = connectedClient.getInputStream().read(); b_list.write((byte) connectedClient.getInputStream().read() );
+				 * 
+				 * } catch (IOException e) { connectedClient.close(); return; }
+				 */
+
+				byte[] rec_buffer = new byte[1024]; // 1KByte buffer
+				int read_count = connectedClient.getInputStream().read(rec_buffer);
+				b_list.write(rec_buffer, 0, read_count);
+
+				Log.i("my", "read bytes : " + read_count);
+
+				//尚需要修正....
+				while (connectedClient.getInputStream().available() > 0) // 可能還有沒讀完的
 				{
-					b_list.write((byte) (b_get));
-					if (connectedClient.getInputStream().available() > 0)
-					{
-						try
-						{
-							b_get = connectedClient.getInputStream().read();
 
-						}
-						catch (IOException e)
-						{
-							connectedClient.close();
-							return;
+					read_count = connectedClient.getInputStream().read(rec_buffer);
 
-						}
-					}
-					else
-					{
-						request_str = new String(b_list.toByteArray(), "UTF-8");
-						break;
-					}
+					Log.i("my", "read bytes : " + read_count);
 
+					b_list.write(rec_buffer, 0, read_count);
 				}
+
+				Log.i("my ", "size :" + b_list.size());
+
+				try
+				{
+					request_str = new String(b_list.toByteArray(), "UTF-8");
+				}
+				catch (Exception e)
+				{
+					Log.i("my", "encode error ****************");
+				}
+
+				// Log.i("my", "接收內容 :    " + request_str ) ;
+
+				/*
+				 * while (b_get != -1) { b_list.write((byte) (b_get)); if (connectedClient.getInputStream().available() > 0) { try { b_get =
+				 * connectedClient.getInputStream().read();
+				 * 
+				 * } catch (IOException e) { connectedClient.close(); return;
+				 * 
+				 * } } else { request_str = new String(b_list.toByteArray(), "UTF-8"); break; }
+				 * 
+				 * }
+				 */
 				// 資料接收區 end
+
+				timer.stop();
+				Log.i("my", "接收花費時間 : " + timer.getElapsedMilliseconds());
 
 				// header分析區 start
 				String firstline = "";
@@ -242,7 +268,7 @@ public class HttpService extends Service // <--龜毛的東西..
 
 				// Java要使用 equals 不是 !=
 				if (!request_method.equals("GET") && !request_method.equals("PROPFIND") && !request_method.equals("MKCOL") && !request_method.equals("DELETE")
-						&& !request_method.equals("MOVE") && !request_method.equals("COPY")  && !request_method.equals("PUT")  )
+						&& !request_method.equals("MOVE") && !request_method.equals("COPY") && !request_method.equals("PUT"))
 				{
 					connectedClient.close();
 					return;
@@ -250,32 +276,77 @@ public class HttpService extends Service // <--龜毛的東西..
 
 				// 放行支援的method進行後續處理
 				Log.i("my", "debug [" + request_target + "]");
-				
+
 				if (request_method.equals("PUT"))
 				{
-					//尚需實做,等補
+
+					File target_file = new File(root_dir + request_target);
+
+					try
+					{
+						if (target_file.exists())
+							target_file.delete();
+
+						Log.i("my", "a");
+
+						FileOutputStream output = new FileOutputStream(target_file);
+
+						Log.i("my", "b");
+
+						int start = (firstline + "\r\n" + request_header_str + "\r\n\r\n").getBytes().length;
+
+						Log.i("my", "c");
+
+						byte[] byte_tmp = b_list.toByteArray();
+
+						timer.reset();
+						timer.start();
+
+						// if (b_list.size() > 0)
+						// for (int i = start; i < b_list.size(); i++)
+						// output.write(byte_tmp[i]);
+
+						output.write(byte_tmp, start, b_list.size() - start);
+
+						timer.stop();
+						Log.i("my", "寫入資料花費時間 : " + timer.getElapsedMilliseconds());
+
+						output.close();
+
+						Log.i("my", "e");
+
+						HeadersString = http_ver + " " + "201 Created" + "\r\n";
+					}
+					catch (Exception e)
+					{
+						HeadersString = http_ver + " " + "403 Forbidden" + "\r\n";
+					}
+
+					HeadersString += "\r\n";
+					connectedClient.getOutputStream().write(HeadersString.getBytes());
 					connectedClient.close();
+
 					return;
 				}
-				
+
 				if (request_method.equals("COPY"))
 				{
 					String des = (String) header_list.get("Destination");
-					String from = root_dir +  request_target;
-					String to = root_dir +  URLDecoder.decode(des.substring(("http://" + (String) header_list.get("Host")).length()), "UTF-8");
-					
-					File target_file = new File ( from);
-					File to_file = new File ( to);
-					
-					if (  target_file.isDirectory()  )
+					String from = root_dir + request_target;
+					String to = root_dir + URLDecoder.decode(des.substring(("http://" + (String) header_list.get("Host")).length()), "UTF-8");
+
+					File target_file = new File(from);
+					File to_file = new File(to);
+
+					if (target_file.isDirectory())
 					{
-						Utils.copyDirectory(target_file, to_file );
+						Utils.copyDirectory(target_file, to_file);
 					}
-					else	
+					else
 					{
-						Utils.copyFile (target_file.getAbsolutePath(), to_file.getAbsolutePath() );
+						Utils.copyFile(target_file.getAbsolutePath(), to_file.getAbsolutePath());
 					}
-										
+
 					HeadersString = http_ver + " " + "201 Created" + "\r\n";
 					HeadersString += "\r\n";
 					connectedClient.getOutputStream().write(HeadersString.getBytes());
@@ -286,23 +357,23 @@ public class HttpService extends Service // <--龜毛的東西..
 				if (request_method.equals("MOVE"))
 				{
 					String des = (String) header_list.get("Destination");
-					String from = root_dir +  request_target;
-					String to = root_dir +  URLDecoder.decode(des.substring(("http://" + (String) header_list.get("Host")).length()), "UTF-8");
-					
-					File target_file = new File ( from);
-					File to_file = new File ( to);
-					
+					String from = root_dir + request_target;
+					String to = root_dir + URLDecoder.decode(des.substring(("http://" + (String) header_list.get("Host")).length()), "UTF-8");
+
+					File target_file = new File(from);
+					File to_file = new File(to);
+
 					target_file.renameTo(to_file);
-					
-					Log.i("my", from );
-					Log.i("my" , to);
-					
+
+					Log.i("my", from);
+					Log.i("my", to);
+
 					HeadersString = http_ver + " " + "201 Created" + "\r\n";
 					HeadersString += "\r\n";
 					connectedClient.getOutputStream().write(HeadersString.getBytes());
 					connectedClient.close();
 					return;
-				
+
 				}
 
 				if (request_method.equals("DELETE"))
@@ -485,7 +556,7 @@ public class HttpService extends Service // <--龜毛的東西..
 					// http://stackoverflow.com/questions/4412848/xml-node-to-string-in-java
 					String xmlbody_str = nodeToString(doc.getDocumentElement());
 
-					Log.i("my", xmlbody_str);
+					//Log.i("my", xmlbody_str);
 
 					body = xmlbody_str.getBytes();
 					HeadersString = http_ver + " " + "207 Multi-Status" + "\r\n";
